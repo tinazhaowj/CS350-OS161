@@ -290,6 +290,20 @@ cmd_quit(int nargs, char **args)
 }
 
 /*
+ * Command for enable debugging message.
+ */
+static
+int
+cmd_debug(int nargs, char **args)
+{
+	(void)nargs;
+	(void)args;
+	
+	dbflags = DB_THREADS;
+	return 0;
+}
+
+/*
  * Command for mounting a filesystem.
  */
 
@@ -437,6 +451,7 @@ static const char *opsmenu[] = {
 	"[sync]    Sync filesystems          ",
 	"[panic]   Intentional panic         ",
 	"[q]       Quit and shut down        ",
+	"[dth]     Enable DB_THREADS debugging message     ",
 	NULL
 };
 
@@ -549,6 +564,7 @@ static struct {
 	{ "q",		cmd_quit },
 	{ "exit",	cmd_quit },
 	{ "halt",	cmd_quit },
+	{ "dth",        cmd_debug},
 
 #if OPT_SYNCHPROBS
 	/* in-kernel synchronization problem(s) */
