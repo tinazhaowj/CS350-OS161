@@ -32,16 +32,54 @@ volatile int count[4];
 volatile unsigned int curDir = 5;
 volatile unsigned int carCount = 0;
 
-/*typedef struct Vehicle {
+typedef struct Vehicle {
   Direction origin;
   Direction destination;
 }Vehicle;
-struct array* varray;*/ 
+struct array* varray; 
 
 void intersection_sync_init(void);
 void intersection_sync_cleanup(void);
 void intersection_before_entry(Direction, Direction);
 void intersection_after_exit(Direction, Direction); 
+static bool right_turn(Vehicle*);
+bool can_pass(Vehicle*);
+
+bool
+right_turn(Vehicle *v) {
+  KASSERT(v != NULL);
+  if (((v->origin == west) && (v->destination == south)) ||
+      ((v->origin == south) && (v->destination == east)) ||
+      ((v->origin == east) && (v->destination == north)) ||
+      ((v->origin == north) && (v->destination == west))) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool
+can_pass(Vehicle *v) {
+  KASSERT(v != NULL);
+  /* compare newly-added vehicle to each other vehicles in in the intersection */
+  for(unsigned int i = 0; i < array_num(varray); ++i) {
+    Vehicle *tempcar = array_get(varray, i);
+
+    if((v == tempcar) || tempcar == NULL) continue;
+    /*no conflict if both vehicles have the same origin*/
+    if (tempcar->origin == v->origin) continue;
+    /* no conflict if vehicles go in opposite directions */
+    if ((tempcar->origin == v->destination) &&
+        (tempcar->destination == v->origin)) continue;
+    /* no conflict if one makes a right turn and 
+       the other has a different destination */
+    if ((right_turn(tempcar) || right_turn(v)) &&
+        (tempcar->destination != v->destination)) continue;
+    return false;
+  }
+  return true;
+}
+
 /* 
  * The simulation driver will call this function once before starting
  * the simulation
@@ -69,10 +107,10 @@ intersection_sync_init(void)
   for(int i = 0; i < 4; ++i)
     count[i] = 0;  
 
-  //varray = array_create();
-  //array_init(varray);
+  varray = array_create();
+  array_init(varray);
 
-  if (mylock == NULL || cv_n == NULL || cv_s == NULL || cv_w == NULL || cv_e == NULL){// || varray == NULL) {
+  if (mylock == NULL || cv_n == NULL || cv_s == NULL || cv_w == NULL || cv_e == NULL || varray == NULL) {
     panic("could not create intersection lock or condition variables");
   }
   //kprintf("sync successfully\n");
@@ -94,15 +132,15 @@ intersection_sync_cleanup(void)
   /* replace this default implementation with your own implementation */
   KASSERT(mylock != NULL);
   KASSERT(cv_n != NULL && cv_s != NULL && cv_w != NULL && cv_e != NULL);
-  //KASSERT(varray != NULL);
+  KASSERT(varray != NULL);
 
   lock_destroy(mylock);
   for(unsigned int i = 0; i < (sizeof(cv_array)/sizeof(cv_array[0])); ++i){
     cv_destroy(cv_array[i]);
   }
 
-  //array_destroy(varray);
-  //kprintf("finish cleaning up\n");
+  array_destroy(varray);
+  kprintf("finish cleaning up\n");
 }
 
 /*
@@ -128,21 +166,22 @@ intersection_before_entry(Direction origin, Direction destination)
   //kprintf("********before entry*********\n");
   KASSERT(mylock != NULL);
   KASSERT(cv_n != NULL && cv_s != NULL && cv_w != NULL && cv_e != NULL);
-  //KASSERT(varray != NULL);
+  KASSERT(varray != NULL);
 
   lock_acquire(mylock);
   //kprintf("acquire lock\n");
-  //struct Vehicle* newcar = kmalloc(sizeof(Vehicle));
-  //newcar->origin = origin;
-  //newcar->destination = destination;
+  struct Vehicle* newcar = kmalloc(sizeof(Vehicle));
+  newcar->origin = origin;
+  newcar->destination = destination;
 
   //while(!intersection_canPass(origin)){}
   ++count[origin];
+  //lock_acquire(mylock);
   //kprintf("car is from %d, to %d\n", origin, destination);
-  //array_add(varray, newcar, NULL);
+  array_add(varray, newcar, NULL);
   if(curDir == 5) curDir = origin;
 
-  if(origin != curDir || carCount > 10){
+  if(!can_pass(newcar) || carCount > 10 || origin != curDir){
     //kprintf("this car should be put to waiting channel\n");
     cv_wait(cv_array[origin], mylock);
   } else {
@@ -185,7 +224,7 @@ intersection_after_exit(Direction origin, Direction destination)
   //kprintf("after exit\n");
   KASSERT(mylock != NULL);
   KASSERT(cv_n != NULL && cv_s != NULL && cv_w != NULL && cv_e != NULL);
-  //KASSERT(varray != NULL);
+  KASSERT(varray != NULL);
 
   lock_acquire(mylock);
   //kprintf("after exit lock acquired\n");
@@ -207,13 +246,11 @@ intersection_after_exit(Direction origin, Direction destination)
   //kprintf("new direction is %d\n", curDir);
   if(curDir != 5) cv_broadcast(cv_array[curDir], mylock);
   
-  /*for(unsigned int i = 0; i < array_num(varray); ++i){
+  for(unsigned int i = 0; i < array_num(varray); ++i){
     Vehicle* car = array_get(varray,i); 
-    if(car->origin == origin && car->destination == destination){
+    if(car->origin == origin && car->destination == destination)
       array_remove(varray, i);
-      --count[origin];
-    }
-  }*/
+  }
   //kprintf("going to relase after exit lock\n");
   lock_release(mylock);
 }
