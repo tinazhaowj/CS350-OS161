@@ -9,6 +9,10 @@
 #include <thread.h>
 #include <addrspace.h>
 #include <copyinout.h>
+#include <mips/trapframe.h>
+#include "opt-A2.h"
+
+static volatile pid_t pid_counter = 1;
 
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
@@ -92,3 +96,56 @@ sys_waitpid(pid_t pid,
   return(0);
 }
 
+#if OPT_A2
+int sys__fork(struct trapframe *tf, int *retval){
+  (void) retval;
+  //create new process
+  struct proc *cur_proc = curproc;
+  struct proc *child_proc = proc_create_runprogram(cur_proc->p_name);
+  
+  //if a process wasn't created
+  if(child_proc == NULL){
+    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new process\n");
+    return ENOMEM;
+  }
+  DEBUG(DB_SYSCALL, "Sys_fork: New process created.\n");
+
+  //assign address space
+  as_copy(curproc_getas(), &(child_proc->p_addrspace));
+  //if address space is not assigned
+  if(child_proc->p_addrspace == NULL){
+    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new addrspace\n");
+    proc_destroy(child_proc);
+    return ENOMEM;
+  }
+  DEBUG(DB_SYSCALL, "Sys_fork: new addrspace created.\n");
+
+  //assign pid?
+/*
+  lock_acquire(mylock);
+  child_proc->pid = counter++;
+  lock_release(mylock);
+*/
+  
+  //create trapframe
+  struct trapframe *ntf = kmalloc(sizeof(struct trapframe));
+  if(ntf == NULL){
+    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new trapframe\n");
+    return ENOMEM;
+  }
+  DEBUG(DB_SYSCALL, "Sys_fork: new trapframe created.\n");
+  memcpy(ntf, tf, sizeof(struct trapframe));
+
+  //create thread
+  int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
+  if(error){
+    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new fork\n");
+    proc_destroy(child_proc);
+    kfree(ntf);
+    return error;
+  }
+  DEBUG(DB_SYSCALL, "Sys_fork: new fork created.\n");
+  //*retval = child_proc->pid;
+  return 0;
+}
+#endif

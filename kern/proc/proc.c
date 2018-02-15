@@ -50,7 +50,7 @@
 #include <vfs.h>
 #include <synch.h>
 #include <kern/fcntl.h>  
-
+#include "opt-A2.h"
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
@@ -69,7 +69,12 @@ static struct semaphore *proc_count_mutex;
 struct semaphore *no_proc_sem;   
 #endif  // UW
 
-
+#if OPT_A2
+struct lock pid_lock;
+struct cv wait_cv;
+struct lock wait_lock;
+struct procTable;
+#endif
 
 /*
  * Create a proc structure.

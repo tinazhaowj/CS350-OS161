@@ -45,6 +45,18 @@ struct vnode;
 struct semaphore;
 #endif // UW
 
+#if OPT_A2
+struct lock;
+struct cv;
+struct procTable
+{
+	pid_t parent_pid;
+	pid_t child_pid;
+	bool dead;
+	int exit_code;
+};
+#endif
+
 /*
  * Process structure.
  */
@@ -69,6 +81,10 @@ struct proc {
 #endif
 
 	/* add more material here as needed */
+#if OPT_A2
+	pid_t pid;
+#endif
+
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
