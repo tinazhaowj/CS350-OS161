@@ -99,20 +99,21 @@ extern struct semaphore *no_proc_sem;
 //extern
 struct lock *pidLock;
 //static volatile pid_t pid_counter;
-//extern struct array *procTable;
-//extern struct cv *waitCV;
-//extern struct lock *waitLock;
+struct array *PTArray;
+extern struct cv *waitCV;
+extern struct lock *waitLock;
 
-/*struct procTable * getParentProcTable(struct array *PT, pid_t targetPid);
+//stores all the parent pids
+struct procTable * getParentProcTable(struct array *PTArray, pid_t targetPid);
+//stores all the child pids
+struct procTable * getChildProcTable(struct array *PTArray, pid_t targetPid);
+//add to the specified process table
+void addProcTable(struct array *PTArray, struct procTable *table);
+//remove the target pid from the specified process table
+void removeProcTable(struct array *PTArray, pid_t targetPid);
+//get the index of the target pid from the specified process table
+unsigned int getIndex(struct array *PTArray, pid_t targetPid);
 
-struct procTable * getChildProcTable(struct array *PT, pid_t targetPid);
-
-void addProcTable(struct array *PT, struct procTable *table);
-
-void removeProcTable(struct array *PT, pid_t child_pid);
-
-unsigned getIndex(struct array *PT, pid_t child_pid);
-*/
 #endif
 
 /* Call once during system startup to allocate data structures. */
