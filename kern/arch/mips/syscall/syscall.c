@@ -35,6 +35,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include <proc.h>
 #include "opt-A2.h"
 
 /*
@@ -120,6 +121,7 @@ syscall(struct trapframe *tf)
 	  /* sys__exit does not return, execution should not get here */
 	  panic("unexpected return from sys__exit");
 	  break;
+
 	case SYS_getpid:
 	  err = sys_getpid((pid_t *)&retval);
 	  break;
@@ -132,6 +134,9 @@ syscall(struct trapframe *tf)
 #endif // UW
 
 	    /* Add stuff here */
+	case SYS_fork:
+	  sys_fork(tf, (pid_t *)&retval);
+	  break;
  
 	default:
 	  kprintf("Unknown syscall %d\n", callno);
@@ -179,7 +184,20 @@ syscall(struct trapframe *tf)
 void
 enter_forked_process(void *tf, unsigned long data)
 {
-	(void)tf;
+	//(void)tf;
 	(void)data;
-	//struct trapframe tframe = tf;
+	struct trapframe *temp = tf;
+	struct trapframe tframe = *temp;
+	tframe.tf_v0 = 0;
+	tframe.tf_a3 = 0;
+	tframe.tf_epc += 4;
+	
+	kfree(temp);
+
+	/* Make sure the syscall code didn't forget to lower spl */
+	KASSERT(curthread->t_curspl == 0);
+	/* ...or leak any spinlocks */
+	KASSERT(curthread->t_iplhigh_count == 0);
+
+	mips_usermode(&tframe);
 }

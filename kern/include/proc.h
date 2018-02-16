@@ -38,6 +38,8 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
+#include <array.h>
+#include "opt-A2.h"
 
 struct addrspace;
 struct vnode;
@@ -48,8 +50,7 @@ struct semaphore;
 #if OPT_A2
 struct lock;
 struct cv;
-struct procTable
-{
+struct procTable {
 	pid_t parent_pid;
 	pid_t child_pid;
 	bool dead;
@@ -81,9 +82,7 @@ struct proc {
 #endif
 
 	/* add more material here as needed */
-#if OPT_A2
-	pid_t pid;
-#endif
+	pid_t p_pid;
 
 };
 
@@ -94,6 +93,24 @@ extern struct proc *kproc;
 #ifdef UW
 extern struct semaphore *no_proc_sem;
 #endif // UW
+
+#if OPT_A2
+extern struct lock *pidLock;
+//extern struct array *procTable;
+//extern struct cv *waitCV;
+//extern struct lock *waitLock;
+
+/*struct procTable * getParentProcTable(struct array *PT, pid_t targetPid);
+
+struct procTable * getChildProcTable(struct array *PT, pid_t targetPid);
+
+void addProcTable(struct array *PT, struct procTable *table);
+
+void removeProcTable(struct array *PT, pid_t child_pid);
+
+unsigned getIndex(struct array *PT, pid_t child_pid);
+*/
+#endif
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);
@@ -118,3 +135,4 @@ struct addrspace *curproc_setas(struct addrspace *);
 
 
 #endif /* _PROC_H_ */
+

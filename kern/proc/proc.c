@@ -55,6 +55,7 @@
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+static volatile pid_t pid_counter = 2;
 
 /*
  * Mechanism for making the kernel menu thread sleep while processes are running
@@ -70,10 +71,10 @@ struct semaphore *no_proc_sem;
 #endif  // UW
 
 #if OPT_A2
-struct lock pid_lock;
-struct cv wait_cv;
-struct lock wait_lock;
-struct procTable;
+struct lock *pidLock;
+//struct array *procTable;
+//struct cv *waitCV;
+//struct lock *waitLock;
 #endif
 
 /*
@@ -213,6 +214,16 @@ proc_bootstrap(void)
     panic("could not create no_proc_sem semaphore\n");
   }
 #endif // UW 
+
+#if OPT_A2
+  pidLock = lock_create("pidLock");
+  //procTable = array_create();
+  //waitCV = cv_create("waitCV");
+  //waitLock = lock_create("waitLock");
+  if(pidLock == NULL ){//|| procTable == NULL  || waitCV == NULL  || waitLock == NULL ){
+  	panic("ERROR when creating pidLock/procTable/waitLock/waitCV");
+  }
+#endif
 }
 
 /*
@@ -231,6 +242,15 @@ proc_create_runprogram(const char *name)
 	if (proc == NULL) {
 		return NULL;
 	}
+
+#if OPT_A2
+	//struct procTable *p = kmalloc(sizeof(struct procTable));
+
+	lock_acquire(pidLock);
+  	proc->p_pid = pid_counter;
+  	++pid_counter;
+  	lock_release(pidLock);
+ #endif
 
 #ifdef UW
 	/* open the console - this should always succeed */
@@ -369,3 +389,56 @@ curproc_setas(struct addrspace *newas)
 	spinlock_release(&proc->p_lock);
 	return oldas;
 }
+
+#if OPT_A2
+/*struct procTable * getParentProcTable(struct array *PT, pid_t targetPid){
+	struct procTable *ret = NULL;
+	unsigned int size = array_num(PT);
+	for(unsigned int i = 0; i < size; ++i){
+		struct procTable *tmp = array_get(PT, i);
+		if(tmp->parent_pid == targetPid){
+			ret = tmp;
+			return ret;
+		}
+	}
+	return NULL;
+}
+struct procTable * getChildProcTable(struct array *PT, pid_t targetPid){
+	struct procTable *ret = NULL;
+	unsigned int size = array_num(PT);
+	for(unsigned int i = 0; i < size; ++i){
+		struct procTable *tmp = array_get(PT, i);
+		if(tmp->child_pid == targetPid){
+			ret = tmp;
+			return ret;
+		}
+	}
+	return NULL;
+}
+void addProcTable(struct array *PT, struct procTable *newtable){
+	array_add(PT, newtable, NULL);
+}
+void removeProcTable(struct array *PT, pid_t child_pid){
+	unsigned int size = array_num(PT);
+
+}
+unsigned getIndex(struct array *PT, pid_t child_pid);*/
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
