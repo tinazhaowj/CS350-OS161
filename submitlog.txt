@@ -1,0 +1,5 @@
+This is /u/cs350/bin/cs350_submit for CS350 assignment 2a.
+/u/cs350/bin/cs350_submit: this script expects to be run in the directory that
+     contains os161-1.99 (the top of the OS/161 source tree).
+     However, there is no os161-1.99 directory here.
+/u/cs350/bin/cs350_submit IS ABORTING!  No files are being submitted to the course account.

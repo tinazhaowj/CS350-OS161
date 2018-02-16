@@ -55,7 +55,6 @@
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
-static volatile pid_t pid_counter = 2;
 
 /*
  * Mechanism for making the kernel menu thread sleep while processes are running
@@ -242,15 +241,6 @@ proc_create_runprogram(const char *name)
 	if (proc == NULL) {
 		return NULL;
 	}
-
-#if OPT_A2
-	//struct procTable *p = kmalloc(sizeof(struct procTable));
-
-	lock_acquire(pidLock);
-  	proc->p_pid = pid_counter;
-  	++pid_counter;
-  	lock_release(pidLock);
-#endif
 
 #ifdef UW
 	/* open the console - this should always succeed */

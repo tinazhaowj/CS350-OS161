@@ -188,16 +188,13 @@ enter_forked_process(void *tf, unsigned long data)
 	(void)data;
 	struct trapframe *temp = tf;
 	struct trapframe tframe = *temp;
+	//child process fork return
 	tframe.tf_v0 = 0;
 	tframe.tf_a3 = 0;
+	//increase the program counter
 	tframe.tf_epc += 4;
 
 	kfree(temp);
-
-	/* Make sure the syscall code didn't forget to lower spl */
-	KASSERT(curthread->t_curspl == 0);
-	/* ...or leak any spinlocks */
-	KASSERT(curthread->t_iplhigh_count == 0);
 
 	mips_usermode(&tframe);
 }
