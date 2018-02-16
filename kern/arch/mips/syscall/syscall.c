@@ -135,7 +135,7 @@ syscall(struct trapframe *tf)
 
 	    /* Add stuff here */
 	case SYS_fork:
-	  sys_fork(tf, (pid_t *)&retval);
+	  err = sys_fork(tf, (pid_t *)&retval);
 	  break;
  
 	default:
@@ -191,7 +191,7 @@ enter_forked_process(void *tf, unsigned long data)
 	tframe.tf_v0 = 0;
 	tframe.tf_a3 = 0;
 	tframe.tf_epc += 4;
-	
+
 	kfree(temp);
 
 	/* Make sure the syscall code didn't forget to lower spl */

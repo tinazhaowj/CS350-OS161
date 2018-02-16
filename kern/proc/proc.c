@@ -250,7 +250,7 @@ proc_create_runprogram(const char *name)
   	proc->p_pid = pid_counter;
   	++pid_counter;
   	lock_release(pidLock);
- #endif
+#endif
 
 #ifdef UW
 	/* open the console - this should always succeed */

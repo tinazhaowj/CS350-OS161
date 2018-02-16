@@ -102,43 +102,48 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
   //create new process
   struct proc *cur_proc = curproc;
   struct proc *child_proc = proc_create_runprogram(cur_proc->p_name);
-  
   //if a process wasn't created
   if(child_proc == NULL){
-    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new process\n");
+    kfree(cur_proc->p_name);
     return ENOMEM;
   }
-  DEBUG(DB_SYSCALL, "Sys_fork: New process created.\n");
+  DEBUG(DB_SYSCALL, "Sys_fork: new process created.\n");
+
 
   //assign address space
-  as_copy(curproc->p_addrspace, &(child_proc->p_addrspace));
+  struct addrspace * child_addr;
+  int err = as_copy(curproc->p_addrspace, &child_addr);
   //if address space is not assigned
-  if(child_proc->p_addrspace == NULL){
-    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new addrspace\n");
+  if(err){
+    kfree(cur_proc->p_name);
     proc_destroy(child_proc);
     return ENOMEM;
   }
   DEBUG(DB_SYSCALL, "Sys_fork: new addrspace created.\n");
+  spinlock_acquire(&child_proc->p_lock);
+  child_proc->p_addrspace = child_addr;
+  spinlock_release(&child_proc->p_lock);
   
+
   //create trapframe
   struct trapframe *ntf = kmalloc(sizeof(struct trapframe));
   if(ntf == NULL){
-    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new trapframe\n");
-    return ENOMEM;
+    kfree(cur_proc->p_name);
+    as_destroy(child_proc->p_addrspace);
   }
-  
   memcpy(ntf, tf, sizeof(struct trapframe));
   DEBUG(DB_SYSCALL, "Sys_fork: new trapframe created.\n");
+
 
   //create thread
   int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
   if(error){
-    DEBUG(DB_SYSCALL, "Sys_fork: Couldn't create new fork\n");
     proc_destroy(child_proc);
     kfree(ntf);
-    return error;
   }
   DEBUG(DB_SYSCALL, "Sys_fork: new fork created.\n");
+
+
   *retval = child_proc->p_pid;
   return 0;
 }

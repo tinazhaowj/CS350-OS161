@@ -81,9 +81,10 @@ struct proc {
   struct vnode *console;                /* a vnode for the console device */
 #endif
 
+#if OPT_A2
 	/* add more material here as needed */
 	pid_t p_pid;
-
+#endif
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -95,7 +96,9 @@ extern struct semaphore *no_proc_sem;
 #endif // UW
 
 #if OPT_A2
-extern struct lock *pidLock;
+//extern
+struct lock *pidLock;
+//static volatile pid_t pid_counter;
 //extern struct array *procTable;
 //extern struct cv *waitCV;
 //extern struct lock *waitLock;
