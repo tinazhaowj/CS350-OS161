@@ -50,12 +50,8 @@ struct semaphore;
 #if OPT_A2
 struct lock;
 struct cv;
-struct procTable {
-	pid_t parent_pid;
-	pid_t child_pid;
-	bool dead;
-	int exit_code;
-};
+struct array *procTable;
+static volatile pid_t pid_counter = 1;
 #endif
 
 /*
@@ -78,12 +74,15 @@ struct proc {
   /* you will probably need to change this when implementing file-related
      system calls, since each process will need to keep track of all files
      it has opened, not just the console. */
-  struct vnode *console;                /* a vnode for the console device */
+  	struct vnode *console;                /* a vnode for the console device */
 #endif
 
 #if OPT_A2
 	/* add more material here as needed */
-	pid_t p_pid;
+	pid_t proc_pid;
+	pid_t parent_pid;
+	bool dead;
+	int exit_code;
 #endif
 };
 
@@ -96,23 +95,16 @@ extern struct semaphore *no_proc_sem;
 #endif // UW
 
 #if OPT_A2
-//extern
 struct lock *pidLock;
-//static volatile pid_t pid_counter;
-struct array *PTArray;
-extern struct cv *waitCV;
-extern struct lock *waitLock;
+struct cv *waitCV;
+struct lock *waitLock;
 
-//stores all the parent pids
-struct procTable * getParentProcTable(struct array *PTArray, pid_t targetPid);
-//stores all the child pids
-struct procTable * getChildProcTable(struct array *PTArray, pid_t targetPid);
-//add to the specified process table
-void addProcTable(struct array *PTArray, struct procTable *table);
-//remove the target pid from the specified process table
-void removeProcTable(struct array *PTArray, pid_t targetPid);
-//get the index of the target pid from the specified process table
-unsigned int getIndex(struct array *PTArray, pid_t targetPid);
+void addToProcTable(struct proc* p);
+void removeFromProcTable(struct proc* p);
+struct proc* findChildProc(struct proc* target);
+struct proc* findParentProc(struct proc* target);
+unsigned int getIndex (struct proc* p);
+void notifyParentDeath(struct proc* p);
 
 #endif
 
