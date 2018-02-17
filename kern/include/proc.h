@@ -48,10 +48,15 @@ struct semaphore;
 #endif // UW
 
 #if OPT_A2
+
 struct lock;
 struct cv;
-struct array *procTable;
-static volatile pid_t pid_counter = 1;
+struct procT{
+	pid_t child_pid;
+	pid_t parent_pid;
+	bool running;
+	int exitcode;
+};
 #endif
 
 /*
@@ -74,16 +79,15 @@ struct proc {
   /* you will probably need to change this when implementing file-related
      system calls, since each process will need to keep track of all files
      it has opened, not just the console. */
-  	struct vnode *console;                /* a vnode for the console device */
+  struct vnode *console;                /* a vnode for the console device */
 #endif
 
-#if OPT_A2
 	/* add more material here as needed */
-	pid_t proc_pid;
-	pid_t parent_pid;
-	bool dead;
-	int exit_code;
+#if OPT_A2
+  pid_t p_pid;
+
 #endif
+
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -95,21 +99,26 @@ extern struct semaphore *no_proc_sem;
 #endif // UW
 
 #if OPT_A2
-struct lock *pidLock;
-struct cv *waitCV;
-struct lock *waitLock;
+extern struct lock *PID_lock;
+extern struct array *procTable;
+extern struct cv *wait_CV;
+extern struct lock *wait_lock;
 
-void addToProcTable(struct proc* p);
-void removeFromProcTable(struct proc* p);
-struct proc* findChildProc(struct proc* target);
-struct proc* findParentProc(struct proc* target);
-unsigned int getIndex (struct proc* p);
-void notifyParentDeath(struct proc* p);
+// get the index of struct
+struct procT * get_procT_p(struct array *procTable, pid_t parent_pid);
+// get the procT
+struct procT * get_procT_c(struct array *procTable, pid_t child_pid);
 
+void remove_procT(struct array *procTable, pid_t child_pid);
+
+unsigned get_index(struct array *procTable, pid_t child_pid);
+
+void add_procT(struct array *procTable, struct procT *table);
 #endif
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);
+
 
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);
@@ -131,4 +140,3 @@ struct addrspace *curproc_setas(struct addrspace *);
 
 
 #endif /* _PROC_H_ */
-
