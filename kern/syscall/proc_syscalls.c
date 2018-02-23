@@ -2,6 +2,7 @@
 #include <kern/errno.h>
 #include <kern/unistd.h>
 #include <kern/wait.h>
+#include <kern/fcntl.h>
 #include <lib.h>
 #include <syscall.h>
 #include <current.h>
@@ -9,43 +10,42 @@
 #include <thread.h>
 #include <addrspace.h>
 #include <copyinout.h>
-#include "opt-A2.h"
+#include <mips/trapframe.h>
 #include <limits.h>
 #include <synch.h>
-#include <addrspace.h>
-#include <mips/trapframe.h>
 #include <vfs.h>
-#include <kern/fcntl.h>
+#include "opt-A2.h"
 
-static volatile pid_t PID_counter = 1;
+static volatile pid_t pid_counter = 2;
 
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
 
 void sys__exit(int exitcode) {
-
+  //parent dead -> burn myself down
+  //parent not dead -> tell parent that i'm dying (leave a message before i die)
+  //child dead -> burn child down
+  //child not dead -> tell them that i'm dying and that they are going to be orphans
+  //main idea: if there is someone related to you who are still alive, tell them you are dying before you die
   struct addrspace *as;
   struct proc *p = curproc;
 
 #if OPT_A2
+  lock_acquire(waitLock);
+  struct Proc * child = findChildProc(curproc->p_pid);
+  if(child != NULL){
+    child->exit_code = _MKWAIT_EXIT(exitcode);
+    child->dead = true;
+  }
+  cv_broadcast(waitCV, waitLock);
 
-  lock_acquire(wait_lock);
-  struct procT * table = get_procT_c(procTable, curproc->p_pid);
-  if(table != NULL){
-    table->exitcode = _MKWAIT_EXIT(exitcode);
-    table->running = false;
+  struct Proc * parent = findParentProc(curproc->p_pid);
+  while(parent != NULL){
+    pid_t temp = parent->child_pid;
+    removeFromProcTable(temp);
+    parent = findParentProc(curproc->p_pid);
   }
-  cv_broadcast(wait_CV, wait_lock);
-  lock_release(wait_lock);
- 
-  lock_acquire(wait_lock); 
-  struct procT * ptable = get_procT_p(procTable, curproc->p_pid);
-  while(ptable != NULL){
-    pid_t c_pid = ptable->child_pid;
-    remove_procT(procTable, c_pid);
-    ptable = get_procT_p(procTable, curproc->p_pid);
-  }
-  lock_release(wait_lock);
+  lock_release(waitLock);
 
 #else
   /* for now, just include this to keep the compiler from complaining about
@@ -79,160 +79,140 @@ void sys__exit(int exitcode) {
   panic("return from thread_exit in sys_exit\n");
 }
 
+
 /* stub handler for getpid() system call                */
 int
 sys_getpid(pid_t *retval)
 {
-  /* for now, this is just a stub that always returns a PID of 1 */
-  /* you need to fix this to make it work properly */
-#if OPT_A2
-  KASSERT(curproc != NULL);
   *retval = curproc->p_pid;
-#else
-  *retval = 1;
-#endif
-  return(0);
-
+  return (0);
 }
 
 /* stub handler for waitpid() system call                */
 
 int
 sys_waitpid(pid_t pid,
-      userptr_t status,
-      int options,
-      pid_t *retval)
+	    userptr_t status,
+	    int options,
+	    pid_t *retval)
 {
   int exitstatus;
-  int result;
-
-  /* this is just a stub implementation that always reports an
-     exit status of 0, regardless of the actual exit status of
-     the specified process.   
-     In fact, this will return 0 even if the specified process
-     is still running, and even if it never existed in the first place.
-
-     Fix this!
-  */
-
+  int result = 0;
   if (options != 0) {
     return(EINVAL);
   }
 
 #if OPT_A2
-  struct procT *table;
-  int ret = 0;
-  lock_acquire(wait_lock);
-  table = get_procT_c(procTable, pid);
-  if(table == NULL){
-    ret = ESRCH;
+  lock_acquire(waitLock);
+  //if(pid != curproc->p_pid) result2 = ECHILD;
+  struct Proc *children = findChildProc(pid);
+  if(children == NULL) {
+    result = ESRCH;
   }
-  if(table->parent_pid != curproc->p_pid){
-    ret = ECHILD;
+  if(children->parent_pid != curproc->p_pid){ 
+    result = ECHILD;
   }
-  
-  if(ret){
-    return ret;
-  }
-  while(table->running){
-    cv_wait(wait_CV, wait_lock);
-  }
-  exitstatus = table->exitcode;
-  
-  remove_procT(procTable, pid);
-  lock_release(wait_lock);
-
-  *retval = pid;
-  result = copyout((void *)&exitstatus,status,sizeof(int));
-  if (result) {
+  if (result > 0) {
+    lock_release(waitLock);
     return(result);
   }
-  return(0);
 
+  while(!children->dead)
+    cv_wait(waitCV, waitLock);
+
+  //zombie
+  exitstatus = children->exit_code;
+
+  lock_release(waitLock);
 #else
   /* for now, just pretend the exitstatus is 0 */
   exitstatus = 0;
+#endif
   result = copyout((void *)&exitstatus,status,sizeof(int));
-  if (result) {
+  if (result > 0) {
     return(result);
   }
   *retval = pid;
   return(0);
-#endif
 }
-
 
 #if OPT_A2
-int
-sys_fork(struct trapframe *tf, pid_t *retval){
+int sys_fork(struct trapframe *tf, pid_t *retval){
   KASSERT(curproc != NULL);
-  
-// Create process structure for child process
-     // need to change the name of the child
-  char *child_name = kmalloc(sizeof(char) * NAME_MAX);
-    strcpy(child_name, curproc->p_name); 
-    strcat(child_name, "_child"); 
-
-  struct proc * child_proc = proc_create_runprogram(child_name);
+  //Create process structure for child process
+  struct proc *cur_proc = curproc;
+  struct proc *child_proc = proc_create_runprogram(cur_proc->p_name);
+  //if a process wasn't created
   if(child_proc == NULL){
-    kfree(child_name);
+    kfree(cur_proc->p_name);
+    return ENPROC;
+  }
+  DEBUG(DB_SYSCALL, "Sys_fork: new process created.\n");
+
+
+  //Create and copy address space (and data) from parent to child
+  int err = as_copy(curproc_getas(), &(child_proc->p_addrspace));
+  //if address space is not assigned
+  if(err){
+    kfree(cur_proc->p_name);
+    proc_destroy(child_proc);
     return ENOMEM;
   }
-
-//Create and copy address space
-  struct addrspace * child_addr;
-  int err = as_copy(curproc->p_addrspace, &child_addr);
-  if(err){
-    kfree(child_name);
-    proc_destroy(child_proc);
-    return ENOMEM; 
-  }
+  DEBUG(DB_SYSCALL, "Sys_fork: new addrspace created.\n");
   
-  spinlock_acquire(&child_proc->p_lock);
-  child_proc->p_addrspace = child_addr;
-  spinlock_release(&child_proc->p_lock);
+  //Assign PID to child process 
+  lock_acquire(pidLock);
+  child_proc->p_pid = pid_counter++;
+  lock_release(pidLock);
 
-//Assign PID to child process and create the parent/child relationship
-  struct procT *table = kmalloc(sizeof(struct procT));
-  if(table == NULL){
-    kfree(child_name);
-    as_destroy(child_addr);
-    proc_destroy(child_proc);
+  //create the parent/child relationship
+  struct Proc *newproc = kmalloc(sizeof(struct Proc));
+  if(newproc == NULL){
+    kfree(cur_proc->p_name);
+    as_destroy(child_proc->p_addrspace);
   }
+  lock_acquire(pidLock);
+  newproc->parent_pid = curproc->p_pid;
+  newproc->child_pid = child_proc->p_pid;
+  newproc->dead = false;
+  newproc->exit_code = 0;
+  lock_release(pidLock);
+  addToProcTable(newproc);
 
-  lock_acquire(PID_lock);
-  PID_counter++;
-  child_proc->p_pid = PID_counter; 
-  lock_release(PID_lock);
-
-  table->child_pid = child_proc->p_pid;
-  table->parent_pid = curproc->p_pid;
-  table->exitcode = 0;
-  table->running = true;
-  add_procT(procTable, table);
-
-
-  struct trapframe *child_tf = kmalloc(sizeof(struct trapframe));
-  if(child_tf == NULL){
-    kfree(child_name);
-    kfree(table);
-    as_destroy(child_addr);
-    proc_destroy(child_proc);
+  //create trapframe
+  struct trapframe *ntf = kmalloc(sizeof(struct trapframe));
+  if(ntf == NULL){
+    kfree(cur_proc->p_name);
+    as_destroy(child_proc->p_addrspace);
+    kfree(newproc);
+    return ENOMEM;
   }
-  memcpy(child_tf, tf, sizeof(struct trapframe));
+  memcpy(ntf, tf, sizeof(struct trapframe));
+  DEBUG(DB_SYSCALL, "Sys_fork: new trapframe created.\n");
 
-//Create thread for child process
-  int error = thread_fork(child_name, child_proc, enter_forked_process, child_tf, 1);  
+
+  //Create thread for child process
+  //int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
+  int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
   if(error){
-    kfree(table);
-    kfree(child_name);
-    as_destroy(child_addr);
-    kfree(child_tf);
     proc_destroy(child_proc);
+    kfree(ntf);
+    return error;
   }
-  
+  DEBUG(DB_SYSCALL, "Sys_fork: new fork created.\n");
+
+
   *retval = child_proc->p_pid;
   return 0;
-
 }
+
+//int execv(const char *program, char **args){
+  //find file path
+  //find the file
+  //open the file
+  //read the file
+  //execute the file
+
+//}
+
 #endif
