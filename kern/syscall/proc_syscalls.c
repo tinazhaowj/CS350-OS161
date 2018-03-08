@@ -224,13 +224,28 @@ int sys_execv(char *program, char **args){
   if(result) return result;
 
   //count number of argument
-  /*int argcount = 0;
+  int argcount = 0;
   while(args[argcount] != NULL){
     if(strlen(args[argcount]) > 1024) return E2BIG;
     ++argcount;
   }
-  if(argcount >= MAXMENUARGS) return E2BIG;
-  */
+  if(argcount > 32) return E2BIG;
+  
+  kprintf("*********there are %d arguments*******", argcount);
+
+  for(int i = 0; i < argcount; ++i){
+    kprintf("the %d argument is %s", i, args[i]);
+  }
+
+  //copy argurment into kernel
+  char **kernargs = kmalloc(sizeof(char) * (argcount + 1));
+  for(int i = 0; i < argcount; ++i){
+    size_t arglen = strlen(args[i]) + 1;
+    kernargs[i] = kmalloc(sizeof(char) * arglen);
+    result = copyinstr((userptr_t)args[i], kernargs[i], arglen, NULL);
+    if(result) return result;
+  }
+  kernargs[argcount] = NULL;
 
   //open the program file
   result = vfs_open(newpath, O_RDONLY, 0, &v);
