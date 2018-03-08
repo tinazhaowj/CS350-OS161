@@ -79,6 +79,7 @@ void sys__exit(int exitcode) {
   panic("return from thread_exit in sys_exit\n");
 }
 
+#if OPT_A2
 
 /* stub handler for getpid() system call                */
 int
@@ -136,7 +137,6 @@ sys_waitpid(pid_t pid,
   return(0);
 }
 
-#if OPT_A2
 int sys_fork(struct trapframe *tf, pid_t *retval){
   KASSERT(curproc != NULL);
   //Create process structure for child process
@@ -205,14 +205,77 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
   *retval = child_proc->p_pid;
   return 0;
 }
+// ************************************************************ A2b
+int sys_execv(char *program, char **args){
+  if(program == NULL) return EFAULT;
+  (void) args;
 
-//int execv(const char *program, char **args){
-  //find file path
-  //find the file
-  //open the file
-  //read the file
-  //execute the file
+  struct addrspace *newaddr;
+  struct addrspace *oldaddr;
+  struct vnode *v;
+  vaddr_t entrypoint, stackptr;
+  int result = 0;
 
-//}
+  //allocate space for path and copy the path
+  size_t len = strlen(program) + 1;
+  char *newpath = kmalloc(sizeof(char*) * len);
+  if(newpath == NULL) return ENOMEM;
+  result = copyinstr((userptr_t)program, newpath, len, NULL);
+  if(result) return result;
+
+  //count number of argument
+  /*int argcount = 0;
+  while(args[argcount] != NULL){
+    if(strlen(args[argcount]) > 1024) return E2BIG;
+    ++argcount;
+  }
+  if(argcount >= MAXMENUARGS) return E2BIG;
+  */
+
+  //open the program file
+  result = vfs_open(newpath, O_RDONLY, 0, &v);
+  if (result) return result;
+  
+  // Create a new address space.
+  newaddr = as_create();
+  if (newaddr ==NULL) {
+    vfs_close(v);
+    return ENOMEM;
+  }
+
+  // Switch to it and activate it.
+  curproc_setas(newaddr);
+  as_activate();
+
+  // Load the executable.
+  result = load_elf(v, &entrypoint);
+  if (result) {
+    // p_addrspace will go away when curproc is destroyed
+    vfs_close(v);
+    curproc_setas(oldaddr);
+    return result;
+  }
+
+  // Done with the file now.
+  vfs_close(v);
+
+  // Define the user stack in the address space
+  result = as_define_stack(newaddr, &stackptr);
+  if (result) {
+    // p_addrspace will go away when curproc is destroyed
+    curproc_setas(oldaddr);
+    return result;
+  }
+
+  //delete old address space
+  //as_destroy(oldaddr);
+
+  // Warp to user mode.
+  enter_new_process(0 /*argc*/, NULL, stackptr, entrypoint);
+  
+  // enter_new_process does not return.
+  panic("enter_new_process returned\n");
+  return EINVAL;
+}
 
 #endif

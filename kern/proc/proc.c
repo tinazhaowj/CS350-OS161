@@ -50,9 +50,7 @@
 #include <vfs.h>
 #include <synch.h>
 #include <kern/fcntl.h>  
-#include <array.h>
 #include "opt-A2.h"
-
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
@@ -72,12 +70,11 @@ struct semaphore *no_proc_sem;
 #endif  // UW
 
 #if OPT_A2
-struct lock *PID_lock;
-struct array *procTable;
-struct cv *wait_CV;
-struct lock *wait_lock;
+struct lock *pidLock;
+struct array *PTArray;
+struct cv *waitCV;
+struct lock *waitLock;
 #endif
-
 
 /*
  * Create a proc structure.
@@ -113,9 +110,7 @@ proc_create(const char *name)
 
 #if OPT_A2
 	proc->p_pid = 1;
-
 #endif
-
 	return proc;
 }
 
@@ -220,88 +215,19 @@ proc_bootstrap(void)
   if (no_proc_sem == NULL) {
     panic("could not create no_proc_sem semaphore\n");
   }
- 
- 
-  
-#endif // UW
-
+#endif // UW 
 
 #if OPT_A2
-  PID_lock = lock_create("PID_lock");
-  if(PID_lock == NULL){
-    panic("could not create PID_lock lock\n");
+  pidLock = lock_create("pidLock");
+  PTArray = array_create();
+  waitCV = cv_create("waitCV");
+  waitLock = lock_create("waitLock");
+  if(pidLock == NULL || PTArray == NULL  || waitCV == NULL  || waitLock == NULL ){
+  	panic("ERROR when creating pidLock/PTArray/waitLock/waitCV");
   }
-  wait_CV = cv_create("wait_CV");
-  if(wait_CV == NULL){
-    panic("could not create wait_CV cv\n");
-  }
-  wait_lock = lock_create("wait_lock");
-  if(PID_lock == NULL){
-    panic("could not create wait_lock lock\n");
-  }  
-  procTable = array_create();
-  if(procTable == NULL){
-    panic("could not create procTable array\n");
-  }  
-
 #endif
- 
 }
 
-#if OPT_A2
-struct procT * get_procT_p(struct array *procTable, pid_t parent_pid){
-  unsigned size = array_num(procTable);
-  struct procT *table = NULL;
-  for (unsigned i = 0; i < size; i++){
-    struct procT *temp = array_get(procTable, i);
-    if(temp->parent_pid == parent_pid){
-      table = temp;
-      return table;
-    }
-  }
-  return NULL;
-}
-
-struct procT *get_procT_c(struct array *procTable, pid_t child_pid){
-  unsigned size = array_num(procTable);
-  struct procT *table = NULL;
-  for (unsigned i = 0; i < size; i++){
-    struct procT * temp = array_get(procTable, i);
-    if(temp->child_pid == child_pid){
-      table = temp;
-      return table;
-    }
-  }
-  return NULL;
-}
-
-unsigned get_index(struct array *procTable, pid_t child_pid){
-  unsigned size = array_num(procTable);
-  for (unsigned i = 0; i < size; i++){
-    struct procT *temp = array_get(procTable, i);
-    if(temp->child_pid == child_pid){
-      return i;
-    }
-  }
-  return size;
-}
-
-void remove_procT(struct array *procTable, pid_t child_pid){
-  unsigned index = get_index(procTable, child_pid);
-  unsigned size = array_num(procTable);
-  struct procT *table = get_procT_c(procTable, child_pid);
-  if(table != NULL && index < size){
-    array_remove(procTable, index);
-    kfree(table);
-  }
-}
-
-void add_procT(struct array *procTable, struct procT *table){
-  int i = array_add(procTable, table, NULL);
-  (void)i;
-}
-
-#endif
 /*
  * Create a fresh proc for use by runprogram.
  *
@@ -456,3 +382,73 @@ curproc_setas(struct addrspace *newas)
 	spinlock_release(&proc->p_lock);
 	return oldas;
 }
+
+#if OPT_A2
+struct Proc * findParentProc(pid_t targetPid){
+	struct Proc *ret = NULL;
+	unsigned int size = array_num(PTArray);
+	for(unsigned int i = 0; i < size; ++i){
+		struct Proc *tmp = array_get(PTArray, i);
+		if(tmp->parent_pid == targetPid){
+			ret = tmp;
+			break;
+		}
+	}
+	return ret;
+}
+struct Proc * findChildProc(pid_t targetPid){
+	struct Proc *ret = NULL;
+	unsigned int size = array_num(PTArray);
+	for(unsigned int i = 0; i < size; ++i){
+		struct Proc *tmp = array_get(PTArray, i);
+		if(tmp->child_pid == targetPid){
+			ret = tmp;
+			break;
+		}
+	}
+	return ret;
+}
+void addToProcTable(struct Proc *table){
+	if (PTArray == NULL) {
+		PTArray = array_create();
+		array_init(PTArray);
+	}
+	array_add(PTArray, table, NULL);
+}
+void removeFromProcTable(pid_t targetPid){
+	struct Proc *target = findChildProc(targetPid);
+	unsigned int pos = getIndex(targetPid);
+	if(pos == array_num(PTArray)) return;
+	if(target != NULL){
+		array_remove(PTArray, pos);
+		kfree(target);
+	}
+}
+
+// if pid is found, return the postion in the array
+// else return INT_MAX;
+unsigned int getIndex(pid_t targetPid){
+	unsigned int size = array_num(PTArray);
+	for(unsigned int i = 0; i < size; ++i){
+		struct Proc *pt = array_get(PTArray, i);
+		if(pt->child_pid == targetPid)
+			return i;
+	}
+	return size;
+}
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

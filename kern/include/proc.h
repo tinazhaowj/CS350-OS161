@@ -48,14 +48,13 @@ struct semaphore;
 #endif // UW
 
 #if OPT_A2
-
 struct lock;
 struct cv;
-struct procT{
-	pid_t child_pid;
+struct Proc {
 	pid_t parent_pid;
-	bool running;
-	int exitcode;
+	pid_t child_pid;
+	bool dead;
+	int exit_code;
 };
 #endif
 
@@ -82,12 +81,10 @@ struct proc {
   struct vnode *console;                /* a vnode for the console device */
 #endif
 
-	/* add more material here as needed */
 #if OPT_A2
-  pid_t p_pid;
-
+	/* add more material here as needed */
+	pid_t p_pid;
 #endif
-
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -99,26 +96,23 @@ extern struct semaphore *no_proc_sem;
 #endif // UW
 
 #if OPT_A2
-extern struct lock *PID_lock;
-extern struct array *procTable;
-extern struct cv *wait_CV;
-extern struct lock *wait_lock;
+//extern
+struct lock *pidLock;
+//static volatile pid_t pid_counter;
+struct array *PTArray;
+extern struct cv *waitCV;
+extern struct lock *waitLock;
 
-// get the index of struct
-struct procT * get_procT_p(struct array *procTable, pid_t parent_pid);
-// get the procT
-struct procT * get_procT_c(struct array *procTable, pid_t child_pid);
+struct Proc * findParentProc(pid_t targetPid);
+struct Proc * findChildProc(pid_t targetPid);
+void addToProcTable(struct Proc *table);
+void removeFromProcTable(pid_t targetPid);
+unsigned int getIndex(pid_t targetPid);
 
-void remove_procT(struct array *procTable, pid_t child_pid);
-
-unsigned get_index(struct array *procTable, pid_t child_pid);
-
-void add_procT(struct array *procTable, struct procT *table);
 #endif
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);
-
 
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);
@@ -140,3 +134,4 @@ struct addrspace *curproc_setas(struct addrspace *);
 
 
 #endif /* _PROC_H_ */
+
