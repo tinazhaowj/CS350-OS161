@@ -205,43 +205,38 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
   *retval = child_proc->p_pid;
   return 0;
 }
-// ************************************************************ A2b
+
 int sys_execv(char *program, char **args){
   if(program == NULL) return EFAULT;
   (void) args;
 
   struct addrspace *newaddr;
-  struct addrspace *oldaddr;
+  struct addrspace *oldaddr = curproc->p_addrspace;
   struct vnode *v;
   vaddr_t entrypoint, stackptr;
   int result = 0;
 
   //allocate space for path and copy the path
-  size_t len = strlen(program) + 1;
-  char *newpath = kmalloc(sizeof(char*) * len);
+  size_t namelen = strlen(program) + 1;
+  char *newpath = kmalloc(sizeof(char*) * namelen);
   if(newpath == NULL) return ENOMEM;
-  result = copyinstr((userptr_t)program, newpath, len, NULL);
+
+  result = copyinstr((userptr_t)program, newpath, namelen, NULL);
   if(result) return result;
 
-  //count number of argument
+  //count number of arguments
   int argcount = 0;
   while(args[argcount] != NULL){
     if(strlen(args[argcount]) > 1024) return E2BIG;
     ++argcount;
   }
   if(argcount > 32) return E2BIG;
-  
-  kprintf("*********there are %d arguments*******", argcount);
-
-  for(int i = 0; i < argcount; ++i){
-    kprintf("the %d argument is %s", i, args[i]);
-  }
 
   //copy argurment into kernel
-  char **kernargs = kmalloc(sizeof(char) * (argcount + 1));
+  char **kernargs = kmalloc(sizeof(char**) * (argcount + 1));
   for(int i = 0; i < argcount; ++i){
     size_t arglen = strlen(args[i]) + 1;
-    kernargs[i] = kmalloc(sizeof(char) * arglen);
+    kernargs[i] = kmalloc(sizeof(char*) * arglen);
     result = copyinstr((userptr_t)args[i], kernargs[i], arglen, NULL);
     if(result) return result;
   }
@@ -282,11 +277,36 @@ int sys_execv(char *program, char **args){
     return result;
   }
 
+  //copy the arguments into the user stack
+  while(stackptr % 8 != 0)
+    --stackptr;
+
+  int size = sizeof(vaddr_t) * (argcount + 1); 
+  vaddr_t *ptrtable = kmalloc(size);
+
+  for(int i = argcount - 1; i >= 0; --i){
+    size_t arg_i_len = strlen(kernargs[i]) + 1;
+    //first find the start of the stack pointer
+    stackptr -= ROUNDUP( arg_i_len * sizeof(char *), 8);
+    //then copy the argument to stack pointer
+    result = copyoutstr(kernargs[i], (userptr_t)stackptr, arg_i_len, NULL);
+    if(result) return result;
+    //then store this pointer to the ptrtable
+    ptrtable[i] = stackptr;
+  }
+  ptrtable[argcount] = (vaddr_t)NULL;
+
+  //copy the pointers (to arguments) into the user stack
+  while(stackptr % 8 != 0)
+    --stackptr;
+  stackptr -= size; 
+  copyout(ptrtable, (userptr_t)stackptr, size);
+
   //delete old address space
-  //as_destroy(oldaddr);
+  as_destroy(oldaddr);
 
   // Warp to user mode.
-  enter_new_process(0 /*argc*/, NULL, stackptr, entrypoint);
+  enter_new_process(argcount, (userptr_t)stackptr, stackptr, entrypoint);
   
   // enter_new_process does not return.
   panic("enter_new_process returned\n");
@@ -294,3 +314,15 @@ int sys_execv(char *program, char **args){
 }
 
 #endif
+
+
+
+
+
+
+
+
+
+
+
+

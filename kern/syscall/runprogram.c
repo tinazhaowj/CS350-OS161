@@ -44,6 +44,8 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
+#include <copyinout.h>
+#include "opt-A2.h"
 
 /*
  * Load program "progname" and start running it in usermode.
@@ -51,19 +53,16 @@
  *
  * Calls vfs_open on progname and thus may destroy it.
  */
-int
-runprogram(char *progname, char** args, size_t nargs)
+#if OPT_A2
+int runprogram(char *progname, char** args, size_t argcount)
+#else
+int runprogram(char *progname)
+#endif
 {
-	(void) nargs;
 	struct addrspace *as;
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
-
-	int argcount = 0;
-	while(args[argcount] != NULL){
-		++argcount;
-	}
 
 	/* Open the file. */
 	result = vfs_open(progname, O_RDONLY, 0, &v);
@@ -103,13 +102,42 @@ runprogram(char *progname, char** args, size_t nargs)
 		return result;
 	}
 
-	#if OPT_A2
-	#endif
+#if OPT_A2
+	//copy the arguments into the user stack
+	while(stackptr % 8 != 0)
+		--stackptr;
 
-	/* Warp to user mode. */
+	vaddr_t *ptrtable = kmalloc(sizeof(vaddr_t) * (argcount + 1));
+	if(ptrtable == NULL) return ENOMEM;
+
+	for(int i = argcount - 1; i >= 0; --i){
+		size_t arg_i_len = strlen(args[i]) + 1;
+		//first find the start of the stack pointer
+		stackptr -= arg_i_len;
+		//then copy the argument to stack pointer
+		result = copyoutstr(args[i], (userptr_t)stackptr, arg_i_len, NULL);
+		//result = copyinstr((userptr_t)stackptr, kernargs[i], arg_i_len, NULL);
+		if(result) return result;
+		//then store this pointer to the ptrtable
+		ptrtable[i] = stackptr;
+	}
+	ptrtable[argcount] = (vaddr_t)NULL;
+
+	//copy the pointers (to arguments) into the user stack
+	while(stackptr % 4 != 0)
+		--stackptr;
+
+	for(int i = argcount; i >= 0; --i){
+		stackptr -= ROUNDUP(sizeof(vaddr_t), 4);
+		result = copyout(&ptrtable[i], (userptr_t) stackptr, sizeof(vaddr_t));
+		if(result) return result;
+ 	}
+ 	enter_new_process(argcount, (userptr_t) stackptr, stackptr, entrypoint);
+#else 
+ 	/* Warp to user mode. */
 	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
 			  stackptr, entrypoint);
-	
+#endif		
 	/* enter_new_process does not return. */
 	panic("enter_new_process returned\n");
 	return EINVAL;
