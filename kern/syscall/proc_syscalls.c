@@ -30,7 +30,7 @@ void sys__exit(int exitcode) {
   struct addrspace *as;
   struct proc *p = curproc;
 
-#if OPT_A2
+//#if OPT_A2
   lock_acquire(waitLock);
   struct Proc * child = findChildProc(curproc->p_pid);
   if(child != NULL){
@@ -47,11 +47,11 @@ void sys__exit(int exitcode) {
   }
   lock_release(waitLock);
 
-#else
-  /* for now, just include this to keep the compiler from complaining about
-     an unused variable */
-  (void)exitcode;
-#endif
+// #else
+//    for now, just include this to keep the compiler from complaining about
+//      an unused variable 
+//   (void)exitcode;
+// #endif
   DEBUG(DB_SYSCALL,"Syscall: _exit(%d)\n",exitcode);
 
   KASSERT(curproc->p_addrspace != NULL);
@@ -79,7 +79,7 @@ void sys__exit(int exitcode) {
   panic("return from thread_exit in sys_exit\n");
 }
 
-#if OPT_A2
+//#if OPT_A2
 
 /* stub handler for getpid() system call                */
 int
@@ -93,9 +93,9 @@ sys_getpid(pid_t *retval)
 
 int
 sys_waitpid(pid_t pid,
-	    userptr_t status,
-	    int options,
-	    pid_t *retval)
+ userptr_t status,
+ int options,
+ pid_t *retval)
 {
   int exitstatus;
   int result = 0;
@@ -103,7 +103,7 @@ sys_waitpid(pid_t pid,
     return(EINVAL);
   }
 
-#if OPT_A2
+//#if OPT_A2
   lock_acquire(waitLock);
   //if(pid != curproc->p_pid) result2 = ECHILD;
   struct Proc *children = findChildProc(pid);
@@ -125,10 +125,10 @@ sys_waitpid(pid_t pid,
   exitstatus = children->exit_code;
 
   lock_release(waitLock);
-#else
+//#else
   /* for now, just pretend the exitstatus is 0 */
-  exitstatus = 0;
-#endif
+//  exitstatus = 0;
+//#endif
   result = copyout((void *)&exitstatus,status,sizeof(int));
   if (result > 0) {
     return(result);
@@ -170,6 +170,7 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
   if(newproc == NULL){
     kfree(cur_proc->p_name);
     as_destroy(child_proc->p_addrspace);
+    proc_destroy(child_proc);
   }
   lock_acquire(pidLock);
   newproc->parent_pid = curproc->p_pid;
@@ -185,6 +186,7 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
     kfree(cur_proc->p_name);
     as_destroy(child_proc->p_addrspace);
     kfree(newproc);
+    proc_destroy(child_proc);
     return ENOMEM;
   }
   memcpy(ntf, tf, sizeof(struct trapframe));
@@ -195,8 +197,11 @@ int sys_fork(struct trapframe *tf, pid_t *retval){
   //int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
   int error = thread_fork(curthread->t_name, child_proc, &enter_forked_process, ntf, 1);
   if(error){
-    proc_destroy(child_proc);
+    kfree(cur_proc->p_name);
+    kfree(newproc);
+    as_destroy(child_proc->p_addrspace);
     kfree(ntf);
+    proc_destroy(child_proc);
     return error;
   }
   DEBUG(DB_SYSCALL, "Sys_fork: new fork created.\n");
@@ -227,10 +232,16 @@ int sys_execv(char *program, char **args){
   //count number of arguments
   int argcount = 0;
   while(args[argcount] != NULL){
-    if(strlen(args[argcount]) > 1024) return E2BIG;
+    if(strlen(args[argcount]) > 1024) {
+      kfree(newpath);
+      return E2BIG;
+    }
     ++argcount;
   }
-  if(argcount > 32) return E2BIG;
+  if(argcount > 32) {
+    kfree(newpath);
+    return E2BIG;
+  }
 
   //copy argurment into kernel
   char **kernargs = kmalloc(sizeof(char**) * (argcount + 1));
@@ -238,17 +249,36 @@ int sys_execv(char *program, char **args){
     size_t arglen = strlen(args[i]) + 1;
     kernargs[i] = kmalloc(sizeof(char*) * arglen);
     result = copyinstr((userptr_t)args[i], kernargs[i], arglen, NULL);
-    if(result) return result;
+    if(result) {
+      kfree(newpath);
+      for(int j = 0; j <= i; j++){
+        kfree(kernargs[j]);
+      }
+      kfree(kernargs);
+      return result;
+    }
   }
   kernargs[argcount] = NULL;
 
   //open the program file
   result = vfs_open(newpath, O_RDONLY, 0, &v);
-  if (result) return result;
+  if (result) {
+    kfree(newpath);
+    for(int j = 0; j < argcount; j++){
+      kfree(kernargs[j]);
+    }
+    kfree(kernargs);
+    return result;
+  }
   
   // Create a new address space.
   newaddr = as_create();
   if (newaddr ==NULL) {
+    kfree(newpath);
+    for(int j = 0; j < argcount; j++){
+      kfree(kernargs[j]);
+    }
+    kfree(kernargs);
     vfs_close(v);
     return ENOMEM;
   }
@@ -260,6 +290,11 @@ int sys_execv(char *program, char **args){
   // Load the executable.
   result = load_elf(v, &entrypoint);
   if (result) {
+    kfree(newpath);
+    for(int j = 0; j < argcount; j++){
+      kfree(kernargs[j]);
+    }
+    kfree(kernargs);
     // p_addrspace will go away when curproc is destroyed
     vfs_close(v);
     curproc_setas(oldaddr);
@@ -272,6 +307,11 @@ int sys_execv(char *program, char **args){
   // Define the user stack in the address space
   result = as_define_stack(newaddr, &stackptr);
   if (result) {
+    kfree(newpath);
+    for(int j = 0; j < argcount; j++){
+      kfree(kernargs[j]);
+    }
+    kfree(kernargs);
     // p_addrspace will go away when curproc is destroyed
     curproc_setas(oldaddr);
     return result;
@@ -290,7 +330,13 @@ int sys_execv(char *program, char **args){
     stackptr -= ROUNDUP( arg_i_len * sizeof(char *), 8);
     //then copy the argument to stack pointer
     result = copyoutstr(kernargs[i], (userptr_t)stackptr, arg_i_len, NULL);
-    if(result) return result;
+    if(result) {
+      for(int j = 0; j < argcount; j++){
+        kfree(kernargs[j]);
+      }
+      kfree(kernargs);
+      return result;
+    }
     //then store this pointer to the ptrtable
     ptrtable[i] = stackptr;
   }
@@ -313,16 +359,4 @@ int sys_execv(char *program, char **args){
   return EINVAL;
 }
 
-#endif
-
-
-
-
-
-
-
-
-
-
-
-
+//#endif

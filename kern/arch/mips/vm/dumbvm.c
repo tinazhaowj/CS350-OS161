@@ -37,6 +37,7 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <opt-A3.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -51,10 +52,43 @@
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
+//bool coremapMade = false;
+struct coremap{
+	paddr_t addr;
+	bool available;
+	bool contiguous;
+};
+
+ struct coremap *mycoremap;
+ unsigned int totalframe;
+
 void
 vm_bootstrap(void)
 {
-	/* Do nothing. */
+//#if OPT_A3
+	paddr_t low;
+	paddr_t high;
+	ram_getsize(&low, &high);
+
+	mycoremap = (struct coremap *)PADDR_TO_KVADDR(low);
+	int frames = (high - low) / PAGE_SIZE;
+	low += frames * sizeof(struct coremap);
+
+	//align the mem
+	while(low % PAGE_SIZE) 
+		++low;
+
+	totalframe = (high - low) / PAGE_SIZE;
+
+	paddr_t temp = low;
+	for(unsigned int i = 0; i < totalframe; ++i){
+		mycoremap[i].addr = temp;
+		mycoremap[i].available = true;
+		mycoremap[i].contiguous = false;
+		temp += PAGE_SIZE;
+	}
+	//coremapMade = true;
+//#endif
 }
 
 static
@@ -86,9 +120,33 @@ alloc_kpages(int npages)
 void 
 free_kpages(vaddr_t addr)
 {
+//#if OPT_A3
+	spinlock_acquire(&stealmem_lock);
+	if(!addr){
+		spinlock_release(&stealmem_lock);
+		kprintf("Free Error");
+		return;
+	} 
+
+	//free the addr, if it is contingious, free the ones follows as well
+	bool found = false;
+	for(unsigned int i = 0; i < totalframe; ++i){
+		if(mycoremap[i].addr == addr){
+			found = true;
+		}
+		if(found){
+			mycoremap[i].available = true;
+			if(!mycoremap[i].contiguous) 
+				break;
+		}
+	}
+	
+	spinlock_release(&stealmem_lock);
+//#else 
 	/* nothing - leak the memory. */
 
-	(void)addr;
+//	(void)addr;
+//#endif
 }
 
 void
@@ -113,6 +171,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	uint32_t ehi, elo;
 	struct addrspace *as;
 	int spl;
+	bool readonly = false;
 
 	faultaddress &= PAGE_FRAME;
 
@@ -120,8 +179,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
-		/* We always create pages read-write, so we can't get this */
-		panic("dumbvm: got VM_FAULT_READONLY\n");
+			/* We always create pages read-write, so we can't get this */
+			//panic("dumbvm: got VM_FAULT_READONLY\n");
+			//kill curproc
+			return EFAULT;
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
@@ -170,6 +231,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	if (faultaddress >= vbase1 && faultaddress < vtop1) {
 		paddr = (faultaddress - vbase1) + as->as_pbase1;
+		readonly = true;
 	}
 	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
 		paddr = (faultaddress - vbase2) + as->as_pbase2;
@@ -194,15 +256,27 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		}
 		ehi = faultaddress;
 		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+
+		//if it is read-only and loadelf is done, change the dirty bit to read only
+		if(as->as_loaded && readonly)
+			elo &= ~TLBLO_DIRTY;
+
 		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
 		tlb_write(ehi, elo, i);
 		splx(spl);
 		return 0;
 	}
 
-	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
+	//kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
+	ehi = faultaddress;
+	elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+
+	if(as->as_loaded && readonly)
+		elo &= ~TLBLO_DIRTY;
+	tlb_random(ehi, elo);
+
 	splx(spl);
-	return EFAULT;
+	return 0;
 }
 
 struct addrspace *
@@ -220,6 +294,7 @@ as_create(void)
 	as->as_pbase2 = 0;
 	as->as_npages2 = 0;
 	as->as_stackpbase = 0;
+	as->as_loaded = false;
 
 	return as;
 }
@@ -227,9 +302,13 @@ as_create(void)
 void
 as_destroy(struct addrspace *as)
 {
+	free_kpages(as->as_pbase1);
+	free_kpages(as->as_pbase2);
+	free_kpages(as->as_stackpbase);
 	kfree(as);
 }
 
+//used to clear TLB
 void
 as_activate(void)
 {
@@ -275,10 +354,16 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 
 	npages = sz / PAGE_SIZE;
 
-	/* We don't use these - all pages are read-write */
-	(void)readable;
-	(void)writeable;
-	(void)executable;
+//#if OPT_A3
+	as->as_read = readable == 1;
+	as->as_write = writeable == 1;
+	as->as_execute = executable == 1;
+// #else 
+// 	/* We don't use these - all pages are read-write */
+// 	(void)readable;
+// 	(void)writeable;
+// 	(void)executable;
+// #endif
 
 	if (as->as_vbase1 == 0) {
 		as->as_vbase1 = vaddr;
